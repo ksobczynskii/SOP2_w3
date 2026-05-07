@@ -92,6 +92,31 @@ void voted_for_message(int fd,int  epoll_fd,int nr) {
     }
 }
 
+ssize_t get_already_read(ssize_t bytes_read[ELECTORS], int registers[ELECTORS],int fd)
+{
+    for (int i=0; i<ELECTORS;i++)
+    {
+        if (registers[i] == fd)
+            return bytes_read[i];
+    }
+    ERR("get already read");
+}
+
+void update_buffor(int fd,ssize_t bytes, int registers[ELECTORS], ssize_t bytes_read[ELECTORS], char elec_buf[ELECTORS][MAX_MESSAGE], char buf[MAX_MESSAGE])
+{
+    int idx = -1;
+
+    for (int i=0; i<ELECTORS; i++)
+    {
+        if (registers[i] == fd)
+            idx = i;
+    }
+    if (idx<0) return;
+
+    buf[bytes+1] = '\0';
+    strcat(buf, elec_buf[idx]);
+}
+
 
 
 int voting(int fd, int registers[ELECTORS]) {
@@ -129,6 +154,10 @@ void server_work(int server_fd) {
         registers[i] = -1;
     }
 
+    char elec_buf[ELECTORS][MAX_MESSAGE];
+    ssize_t bytes_read[ELECTORS];
+
+    memset(bytes_read, 0, sizeof(bytes_read));
 
 
     int nfds;
@@ -164,6 +193,26 @@ void server_work(int server_fd) {
                         int32_t nr;
                         bytes = bulk_read(fd, buf, MAX_MESSAGE);
                         if (bytes >0) {
+                            ssize_t already_read = get_already_read(bytes_read, registers, fd);
+                            if (bytes + already_read < sizeof(int32_t))
+                            {
+                                update_buffor(fd, bytes, registers, bytes_read,elec_buf,buf);
+                                continue;
+                            }
+                            if (already_read != 0)
+                            {
+                                int idx = -1;
+                                for (int j=0; j<ELECTORS; j++)
+                                {
+                                    if (registers[j] == fd)
+                                        idx = j;
+                                }
+                                if (idx == -1)
+                                    continue;
+                                strcat(elec_buf[idx], buf);
+                                memset(buf, 0, MAX_MESSAGE);
+                                strncpy(buf,elec_buf[idx],sizeof(int32_t));
+                            }
                             // printf("Buf is: %s\n", buf);
                             nr = atoi(buf);
                             // printf("Nr. is: '%d'\n", nr);
